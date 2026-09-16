@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Security;
 using System.Configuration;
 using System.Runtime.InteropServices;
+using System.ComponentModel;
 
 namespace TE.Plex
 {
@@ -157,6 +158,10 @@ namespace TE.Plex
         /// Maxiumum path length.
         /// </summary>
         private const int MaxPathSize = 256;
+        /// <summary>
+        /// The maximum time to wait for a Plex process to exit.
+        /// </summary>
+        private const int ProcessExitTimeoutMilliseconds = 30000;
         #endregion
 
         #region Private Variables
@@ -676,13 +681,33 @@ namespace TE.Plex
             Process[] processes = Process.GetProcessesByName(fileName);
             foreach (Process proc in processes)
             {
-                proc.Kill();
-                proc.WaitForExit();
+                using (proc)
+                {
+                    int processId = -1;
+                    try
+                    {
+                        processId = proc.Id;
+                        OnMessageChanged($"Stopping {processName} process (PID {processId}).");
+                        proc.Kill();
+
+                        if (!proc.WaitForExit(ProcessExitTimeoutMilliseconds))
+                        {
+                            OnMessageChanged($"{processName} process (PID {processId}) did not exit after {ProcessExitTimeoutMilliseconds / 1000} seconds.");
+                        }
+                    }
+                    catch (Win32Exception ex)
+                    {
+                        OnMessageChanged($"Could not stop {processName} process (PID {processId}). Reason: {ex.Message}");
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        OnMessageChanged($"{processName} process (PID {processId}) exited while it was being stopped. Reason: {ex.Message}");
+                    }
+                }
             }
 
             // Check to see if any processes are still running
-            processes = Process.GetProcessesByName(fileName);
-            if (processes.Count() > 0)
+            if (AreProcessesRunning(fileName))
             {
                 using (Process process = new Process())
                 {
@@ -691,8 +716,38 @@ namespace TE.Plex
                         FileName = "taskkill.exe",
                         Arguments = $"/F /IM \"{processName}\""
                     };
-                    process.Start();
-                    process.WaitForExit();
+                    if (!process.Start() || !process.WaitForExit(ProcessExitTimeoutMilliseconds))
+                    {
+                        throw new InvalidOperationException(
+                            $"Could not stop {processName} processes within {ProcessExitTimeoutMilliseconds / 1000} seconds.");
+                    }
+                }
+            }
+
+            if (AreProcessesRunning(fileName))
+            {
+                throw new InvalidOperationException(
+                    $"{processName} processes are still running after shutdown attempts.");
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether any processes match a specific name.
+        /// </summary>
+        /// <param name="processName">The process name without the file extension.</param>
+        /// <returns>True if matching processes are running; otherwise, false.</returns>
+        private bool AreProcessesRunning(string processName)
+        {
+            Process[] processes = Process.GetProcessesByName(processName);
+            try
+            {
+                return processes.Length > 0;
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
                 }
             }
         }
@@ -926,16 +981,21 @@ namespace TE.Plex
                     "The Plex service was not found.");
             }
 
-            OnMessageChanged("START: Stopping the Plex service.");
-            plexService.Stop();
-            OnMessageChanged("END: Stopping the Plex service.");
-
-            OnMessageChanged("START: Stopping the Plex Server processes.");
-            StopProcesses();
-            OnMessageChanged("END: Stopping the Plex Server processes.");
-
+            Exception updateException = null;
+            bool serviceShutdownInitiated = false;
+            bool serviceStopped = false;
             try
             {
+                OnMessageChanged("START: Stopping the Plex service.");
+                serviceShutdownInitiated = true;
+                plexService.Stop();
+                serviceStopped = true;
+                OnMessageChanged("END: Stopping the Plex service.");
+
+                OnMessageChanged("START: Stopping the Plex Server processes.");
+                StopProcesses();
+                OnMessageChanged("END: Stopping the Plex Server processes.");
+
                 OnMessageChanged($"START: Running update: {LatestInstallPackage}.");
                 RunInstall();
                 OnMessageChanged("END: Running update.");
@@ -945,19 +1005,66 @@ namespace TE.Plex
                 OnMessageChanged("END: Deleting Plex Run registry value.");
                 GetVersions();
             }
-            catch
+            catch (Exception ex)
             {
+                updateException = ex;
                 throw;
             }
             finally
             {
-                OnMessageChanged("START: Stopping the Plex Server processes.");
-                StopProcesses();
-                OnMessageChanged("END: Stopping the Plex Server processes.");
+                Exception cleanupException = null;
+                Exception restartException = null;
 
-                OnMessageChanged("START: Restarting the Plex service.");
-                plexService.Start();
-                OnMessageChanged("END: Restarting the Plex service.");
+                try
+                {
+                    if (serviceStopped)
+                    {
+                        OnMessageChanged("START: Stopping the Plex Server processes.");
+                        StopProcesses();
+                        OnMessageChanged("END: Stopping the Plex Server processes.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    cleanupException = ex;
+                    OnMessageChanged($"ERROR: Could not stop Plex Server processes during cleanup. Reason: {ex.Message}");
+                }
+
+                try
+                {
+                    if (serviceShutdownInitiated)
+                    {
+                        OnMessageChanged("START: Restarting the Plex service.");
+                        plexService.Start();
+                        OnMessageChanged("END: Restarting the Plex service.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    restartException = ex;
+                    OnMessageChanged($"ERROR: Could not restart the Plex service. Reason: {ex.Message}");
+                }
+
+                if (updateException == null)
+                {
+                    if (cleanupException != null && restartException != null)
+                    {
+                        throw new AggregateException(
+                            "Plex process cleanup and service restart failed.",
+                            cleanupException,
+                            restartException);
+                    }
+
+                    if (cleanupException != null)
+                    {
+                        throw cleanupException;
+                    }
+
+                    if (restartException != null)
+                    {
+                        throw restartException;
+                    }
+                }
             }
         }
         #endregion
