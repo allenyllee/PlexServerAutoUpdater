@@ -89,6 +89,7 @@
     <Compile Include="Plex\Update\BinaryArchitecture.cs" />
     <Compile Include="Plex\Update\ServiceUpdateSequence.cs" />
     <Compile Include="Plex\Update\PlaybackPolicy.cs" />
+    <Compile Include="Plex\Update\InstallerArguments.cs" />
     <Compile Include="Plex\Update\Package.cs" />
     <Compile Include="Plex\Update\Release.cs" />
     <Compile Include="Plex\Update\SystemType.cs" />

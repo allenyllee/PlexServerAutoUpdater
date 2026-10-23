@@ -645,11 +645,8 @@ namespace TE.Plex
 
             // Default to the 32-bit parameter installation, but change to the
             // 64-bit parameters if the 64-bit version of Plex is installed
-            string parameters = $"{PlexInstallParameters.Trim()} \"{logFile}\"";
-            if (Is64Bit)
-            {
-                parameters = $"{PlexInstallParametersx64.Trim()} \"{logFile}\"";
-            }
+            string parameters = InstallerArguments.Create(Is64Bit,
+                Is64Bit ? PlexInstallParametersx64 : PlexInstallParameters, logFile);
 
             ProcessStartInfo startInfo = new ProcessStartInfo(
                 LatestInstallPackage.FilePath,

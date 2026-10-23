@@ -32,6 +32,9 @@ service-account discovery, public/Plex Pass channels, and `-silent`, `-wait`,
   an update. Silent mode waits synchronously for idle instead of exiting with a
   background timer. `-force` still cannot interrupt recording.
 - Treat `-log` as a directory, as documented; fix the default installer log path.
+- Use `/SUPPRESSMSGBOXES /SP-` and `/LOG="path"` for x64 Inno Setup. A live
+  scheduled update exposed a migration message for an old x86 installation,
+  which otherwise blocks unattended installation despite `/verysilent`.
 - `-check -silent` checks/downloads the matching package without stopping the
   service or installing it. This mode does not require elevation.
 
@@ -56,7 +59,7 @@ highest privileges. Never put the account password or Plex token in Git.
 
 ## Validation record
 
-2026-10-23: Windows build succeeded; 31 regression assertions passed. Live
+2026-10-23: Windows build succeeded; 37 regression assertions passed. Live
 `-check -silent` returned 0 and correctly selected the x64 release, rejected an
 incomplete cached installer, downloaded it again, and verified the checksum.
 See local deployment notes for the installed commit and live upgrade outcome.

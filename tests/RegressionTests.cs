@@ -119,6 +119,13 @@ internal static class RegressionTests
             string logDirectory = Path.Combine(temporary,"logs");
             TE.Log.SetFolder(logDirectory);
             Check(TE.Log.Folder==logDirectory, "log parameter retains requested directory");
+            string installerArguments = InstallerArguments.Create(true,"/verysilent /norestart /log ","C:\\Logs With Spaces\\install.log");
+            Check(installerArguments.Contains("/SUPPRESSMSGBOXES"), "suppress x86 migration message in unattended x64 update");
+            Check(installerArguments.Contains("/SP-"), "suppress startup confirmation in unattended x64 update");
+            Check(installerArguments.Contains("/LOG=\"C:\\Logs With Spaces\\install.log\""), "Inno log filename uses equals and quotes");
+            Check(!installerArguments.Contains("/log "), "remove legacy Inno logging syntax");
+            Check(InstallerArguments.Create(false,"/install /quiet /norestart /log ","C:\\install.log").EndsWith("/log \"C:\\install.log\""), "retain WiX x86 logging syntax");
+            Throws(()=>InstallerArguments.Create(true,null,"bad\"path"), "reject malformed quoted log path");
             Console.WriteLine("All " + count + " regression assertions passed.");
             return 0;
         }
