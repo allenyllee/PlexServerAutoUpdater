@@ -1,0 +1,71 @@
+name: Publish Windows release
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, for example v0.2.2.0
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
+jobs:
+  package:
+    if: github.repository == 'allenyllee/PlexServerAutoUpdater'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a version tag on the maintained main branch
+        shell: powershell
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+\.\d+$') { throw 'Invalid version tag.' }
+          git merge-base --is-ancestor HEAD origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'Release commit must be part of master.' }
+      - name: Build and run regression tests
+        shell: powershell
+        run: .\build.ps1 -Test
+      - name: Package and test release assets
+        shell: powershell
+        run: |
+          .\scripts\package.ps1 -Tag $env:RELEASE_TAG
+          .\tests\Test-ReleasePackage.ps1 -Tag $env:RELEASE_TAG
+          .\tests\Test-ReleasePublisher.ps1 -Tag $env:RELEASE_TAG
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          if-no-files-found: error
+          path: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+            artifacts/manifest.json
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Publish verified assets without overwriting existing binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -AssetDirectory release-assets

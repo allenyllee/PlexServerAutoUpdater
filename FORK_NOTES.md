@@ -57,6 +57,31 @@ Preserve the local service name, installation path, and data-directory settings.
 Schedule `psupdate.exe -silent -log <directory>` as the service account with
 highest privileges. Never put the account password or Plex token in Git.
 
+## Automated releases
+
+Stable releases are built from version tags on `master`. Update both version
+attributes in `Properties/AssemblyInfo.cs`, merge tested changes, then push a tag
+such as `v0.2.2.0`. Publishing a GitHub Release for the tag also triggers the same
+workflow; manual reruns accept an existing tag via the Actions page.
+
+The release workflow builds on Windows, runs all regression and packaging tests,
+and uploads assets to GitHub Releases in a separate job. Only that publishing job
+has `contents: write`; it uses the built-in GitHub token, with no personal token.
+The tag must match the executable version and its commit must belong to `master`.
+
+Assets:
+- `psupdate-vVERSION-windows-net48.zip`: executable, config, Newtonsoft.Json DLL,
+  license, fork notes, and manifest. Extract the entire ZIP, not just the EXE.
+- `manifest.json`: source commit, version, and hashes of packaged files.
+- `SHA256SUMS.txt`: checksums for the ZIP and manifest.
+
+Packaging uses fixed ZIP timestamps so reruns produce the same bytes from the
+same build. Publishing resumes an incomplete release and verifies existing
+assets; it refuses to overwrite a different published binary under the same
+version. Download the ZIP from this fork's Releases page and preserve local
+configuration when upgrading the updater. The Plex scheduled task updates Plex,
+not the updater itself.
+
 ## Validation record
 
 2026-10-23: Windows build succeeded; 37 regression assertions passed. Live
