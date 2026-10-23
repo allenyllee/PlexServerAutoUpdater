@@ -251,7 +251,7 @@ namespace TE.Plex.Update
 
                 return Path.Combine(
                     _updatesFolder, 
-                    $@"{LatestWindowsVersion.Version}\packages");
+                    $@"{LatestWindowsVersion.GetVersionString(_is64Bit)}\packages");
             }
             catch (Exception ex)
                 when (ex is ArgumentException || ex is System.Security.SecurityException)
@@ -312,6 +312,7 @@ namespace TE.Plex.Update
                 OnMessageChanged($"Sending request to Plex: {url}");
                 using (HttpResponseMessage response = _client.GetAsync(url).Result)
                 {
+                    response.EnsureSuccessStatusCode();
                     content = response.Content.ReadAsStringAsync().Result;
                 }
 
@@ -355,6 +356,8 @@ namespace TE.Plex.Update
             CurrentVersion versions =
                 JsonConvert.DeserializeObject<CurrentVersion>(json);
 
+            if (versions == null || versions.Computer == null || !versions.Computer.ContainsKey("Windows"))
+                throw new InvalidOperationException("Plex returned no Windows release metadata.");
             LatestWindowsVersion = versions.Computer["Windows"];
             if (LatestWindowsVersion == null)
             {
@@ -456,6 +459,7 @@ namespace TE.Plex.Update
                         HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(
                             false))
                 {
+                    response.EnsureSuccessStatusCode();
                     // Get the stream content
                     using (Stream streamToReadFrom =
                         await response.Content.ReadAsStreamAsync())
@@ -499,7 +503,7 @@ namespace TE.Plex.Update
                 }                
             }
 
-            string version = LatestWindowsVersion.Version;
+            string version = LatestWindowsVersion.GetVersionString(_is64Bit);
             if (string.IsNullOrEmpty(version))
             {
                 return default;
@@ -599,7 +603,8 @@ namespace TE.Plex.Update
 
             OnMessageChanged("Checking if the installation package is valid.");
             bool isValid =
-                checksum.Equals(LatestWindowsVersion.GetCheckSum(_is64Bit));
+                !string.IsNullOrEmpty(checksum) &&
+                string.Equals(checksum, LatestWindowsVersion.GetCheckSum(_is64Bit), StringComparison.OrdinalIgnoreCase);
 
             if (isValid)
             {
@@ -607,7 +612,7 @@ namespace TE.Plex.Update
             }
             else
             {
-                OnMessageChanged("The package is not valid. The checksums match.");
+                OnMessageChanged("The package is not valid. The checksums do not match.");
             }
             return isValid;
         }

@@ -1,5 +1,10 @@
 # Plex Server Auto Updater
 
+This maintained fork fixes architecture/version selection and service recovery.
+See [FORK_NOTES.md](FORK_NOTES.md) for changes, build/test instructions, upstream
+issues, and deployment details. The original interface and command-line workflow
+are retained. Use `-check -silent` for a check without installing or stopping Plex.
+
 The Plex Server Auto Updater application allows the Plex Media server to be updated automatically when it is [run as a Windows service].
 
 ## What does it do?

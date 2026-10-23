@@ -74,7 +74,7 @@ namespace TE
                 // Call this to validate the path
                 Path.GetFullPath(path);
 
-                Folder = Path.GetDirectoryName(path);
+                Folder = Path.GetFullPath(path);
                 if (!Directory.Exists(Folder))
                 {
                     Directory.CreateDirectory(Folder);
