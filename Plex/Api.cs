@@ -184,6 +184,28 @@ namespace TE.Plex
                 return inProgressRecordingCount;
             }
 
+            // Servers without a DVR return 401 for scheduled recordings, even for the owner.
+            try
+            {
+                using (var request = new HttpRequestMessage(HttpMethod.Get, $"http://{_server}:32400/livetv/dvrs"))
+                {
+                    request.Headers.Add("X-Plex-Token", _token);
+                    using (var response = _client.SendAsync(request).GetAwaiter().GetResult())
+                    {
+                        response.EnsureSuccessStatusCode();
+                        var dvrs = XDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+                        int count;
+                        if (dvrs.Root == null || !int.TryParse((string)dvrs.Root.Attribute("size"), out count) || count < 0)
+                            return Unknown;
+                        if (count == 0) return 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnMessageChanged($"Could not determine DVR state: {ex.Message}");
+                return Unknown;
+            }
             string url = $"http://{_server}:32400/media/subscriptions/scheduled?X-Plex-Token={_token}";
             string content = null;
             try

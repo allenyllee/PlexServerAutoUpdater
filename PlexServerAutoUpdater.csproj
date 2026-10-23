@@ -55,7 +55,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Newtonsoft.Json">
-      <HintPath>..\..\Visual Studio 2017\Projects\Supporting\Newtonsoft.Json\net45\Newtonsoft.Json.dll</HintPath>
+      <HintPath>packages\newtonsoft.json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
@@ -69,9 +69,7 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Management" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="System.Security.Principal" />
     <Reference Include="System.ServiceProcess" />
-    <Reference Include="System.Text.RegularExpressions" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Xml.Linq">
@@ -88,6 +86,10 @@
     <Compile Include="Plex\EventSource.cs" />
     <Compile Include="Plex\Registry.cs" />
     <Compile Include="Plex\Update\CurrentVersion.cs" />
+    <Compile Include="Plex\Update\BinaryArchitecture.cs" />
+    <Compile Include="Plex\Update\ServiceUpdateSequence.cs" />
+    <Compile Include="Plex\Update\PlaybackPolicy.cs" />
+    <Compile Include="Plex\Update\InstallerArguments.cs" />
     <Compile Include="Plex\Update\Package.cs" />
     <Compile Include="Plex\Update\Release.cs" />
     <Compile Include="Plex\Update\SystemType.cs" />

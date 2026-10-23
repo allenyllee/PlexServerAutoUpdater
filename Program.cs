@@ -41,6 +41,7 @@ namespace TE.Plex
             // redirect console output to parent process;
             // must be before any calls to Console.WriteLine()
             AttachConsole(ATTACH_PARENT_PROCESS);
+            System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
 
             Arguments arguments = new Arguments(args);
             
@@ -58,7 +59,7 @@ namespace TE.Plex
 
                 Log.Write("Checking if user is an administrator.");
                 // Check if the user running this application is an administrator
-                if (!user.IsAdministrator())
+                if (!user.IsAdministrator() && arguments["check"] == null)
                 {
                     string message = "This application must be run from an administrative account.";
 
@@ -94,6 +95,17 @@ namespace TE.Plex
 
                 ExitCode = 1;
                 return 1;
+            }
+
+            if (arguments["check"] != null)
+            {
+                try
+                {
+                    var server = new MediaServer(Log.Folder, (sender, message) => Log.Write(message));
+                    Log.Write("Check only: no installation or service changes were performed.");
+                    return server.CurrentVersion != null && server.LatestVersion != null ? 0 : 1;
+                }
+                catch (Exception ex) { Log.Write(ex); return 1; }
             }
 
             if (isSilent)

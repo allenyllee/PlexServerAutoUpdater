@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using System.IO;
+using System.Text.RegularExpressions;
 
 namespace TE.Plex.Update
 {
@@ -78,6 +80,21 @@ namespace TE.Plex.Update
         [JsonProperty("releases")]
         public List<Release> Releases { get; set; } = new List<Release>();
 
+        public string GetVersionString(bool is64Bit)
+        {
+            string url = GetUrl(is64Bit);
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != "https")
+                throw new InvalidOperationException("Missing HTTPS release URL for the installed architecture.");
+            string architecture = is64Bit ? "x86_64" : "x86";
+            Match match = Regex.Match(Path.GetFileName(uri.LocalPath),
+                @"^PlexMediaServer-(\d+\.\d+\.\d+\.\d+-[a-zA-Z0-9]+)-" + architecture + @"\.exe$");
+            if (!match.Success)
+                throw new InvalidOperationException("The selected installer does not match its declared architecture.");
+            // Plex's platform-level version may describe x64 while x86 remains on an older release.
+            return match.Groups[1].Value;
+        }
+
         /// <summary>
         /// Gets the download URL based on whether the 32-bit or 64-bit
         /// version of Plex Media Server is to be downloaded.
@@ -92,13 +109,13 @@ namespace TE.Plex.Update
         {
             foreach (Release release in Releases)
             {
-                if (release.Build.Equals(BUILD32BIT, StringComparison.OrdinalIgnoreCase)
+                if (release != null && string.Equals(release.Build, BUILD32BIT, StringComparison.OrdinalIgnoreCase)
                     && !is64Bit)
                 {
                     return release.Url;
                 }
 
-                if (release.Build.Equals(BUILD64BIT, StringComparison.OrdinalIgnoreCase)
+                if (release != null && string.Equals(release.Build, BUILD64BIT, StringComparison.OrdinalIgnoreCase)
                     && is64Bit)
                 {
                     return release.Url;
@@ -123,13 +140,13 @@ namespace TE.Plex.Update
         {
             foreach (Release release in Releases)
             {
-                if (release.Build.Equals(BUILD32BIT, StringComparison.OrdinalIgnoreCase)
+                if (release != null && string.Equals(release.Build, BUILD32BIT, StringComparison.OrdinalIgnoreCase)
                     && !is64Bit)
                 {
                     return release.CheckSum;
                 }
 
-                if (release.Build.Equals(BUILD64BIT, StringComparison.OrdinalIgnoreCase)
+                if (release != null && string.Equals(release.Build, BUILD64BIT, StringComparison.OrdinalIgnoreCase)
                     && is64Bit)
                 {
                     return release.CheckSum;

@@ -1,0 +1,26 @@
+name: Windows build and regression tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .NET Framework 4.8 application and run tests
+        shell: powershell
+        run: .\build.ps1 -Test
+      - name: Smoke-test release packaging
+        shell: powershell
+        run: |
+          $tag = 'v' + (Get-Item .\bin\Release\psupdate.exe).VersionInfo.FileVersion
+          .\scripts\package.ps1 -Tag $tag
+          .\tests\Test-ReleasePackage.ps1 -Tag $tag
+          .\tests\Test-ReleasePublisher.ps1 -Tag $tag
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psupdate-windows-net48
+          path: |
+            bin/Release/psupdate.exe
+            bin/Release/psupdate.exe.config
+            bin/Release/Newtonsoft.Json.dll

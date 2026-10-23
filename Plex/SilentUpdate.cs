@@ -140,46 +140,9 @@ namespace TE.Plex
             int playCount = _server.GetPlayCount();
             int inProgressRecordingCount = _server.GetInProgressRecordingCount();
 
-            // No item is currently being played
-            if (playCount == 0 && inProgressRecordingCount == 0)
-            {
-                Log.Write("The server is not in use continuing to perform the update.");
-                _timer.Enabled = false;
-                return true;
-            }
-            // At least one item is being played
-            else if (playCount > 0 || inProgressRecordingCount > 0)
-            {
-                if (!ForceUpdate)
-                {
-                    Log.Write("The server is in use. Waiting for all media and/or in progress recordings to be stopped before performing the update.");
-                    _timer.Interval =
-                        Convert.ToDouble(Math.Abs(WaitTime) * 1000);
-                    _timer.Enabled = true;
-                    return false;
-                }
-                else if (ForceUpdate && inProgressRecordingCount > 0)
-                {
-                    Log.Write("The server cannot be forcefully updated while there is a recording in progress.  Waiting for all in progress recordings to be stopped before performing the update.");
-                    _timer.Interval =
-                        Convert.ToDouble(Math.Abs(WaitTime) * 1000);
-                    _timer.Enabled = true;
-                    return false;
-                }
-                else
-                {
-                    Log.Write("The update is set to be force. The update will continue.");
-                    _timer.Enabled = false;
-                    return true;
-                }
-            }
-            // Could not determine how many items are being played
-            else
-            {
-                Log.Write("The server in use status could not be determined. The server can be updated if you wish.");
-                _timer.Enabled = false;
-                return true;
-            }
+            bool canUpdate = Update.PlaybackPolicy.CanUpdate(playCount, inProgressRecordingCount, ForceUpdate);
+            Log.Write(canUpdate ? "The server can be updated." : "Waiting for playback and recordings to finish.");
+            return canUpdate;
         }
 
         /// <summary>
@@ -255,7 +218,12 @@ namespace TE.Plex
         /// </returns>
         public bool IsPlexRunning() 
         {
-            return _server.IsRunning();
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                if (_server.IsRunning()) return true;
+                System.Threading.Thread.Sleep(2000);
+            }
+            return false;
         }
         /// <summary>
         /// Runs the Plex Media Server update.
@@ -267,11 +235,10 @@ namespace TE.Plex
                 Log.Write("Checking for server update.");
                 if (_server.IsUpdateAvailable())
                 {
-                    if (CheckIfCanUpdate())
-                    {
-                        Log.Write("Update is available");
-                        _server.Update();
-                    }
+                    while (!CheckIfCanUpdate())
+                        System.Threading.Thread.Sleep(TimeSpan.FromSeconds(Math.Max(1, Math.Abs(WaitTime))));
+                    Log.Write("Update is available");
+                    _server.Update();
                 }
                 else
                 {
@@ -282,6 +249,7 @@ namespace TE.Plex
             {
                 Log.Write(ex.Message);
                 Log.Write(ex.StackTrace);
+                throw;
             }
         }
         #endregion

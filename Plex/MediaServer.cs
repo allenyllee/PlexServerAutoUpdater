@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Security;
 using System.Configuration;
 using System.Runtime.InteropServices;
+using System.ComponentModel;
 
 namespace TE.Plex
 {
@@ -157,6 +158,10 @@ namespace TE.Plex
         /// Maxiumum path length.
         /// </summary>
         private const int MaxPathSize = 256;
+        /// <summary>
+        /// The maximum time to wait for a Plex process to exit.
+        /// </summary>
+        private const int ProcessExitTimeoutMilliseconds = 30000;
         #endregion
 
         #region Private Variables
@@ -409,16 +414,15 @@ namespace TE.Plex
                 // To avoid using the Windows Installer API, let's first check well
                 // known paths to find the Plex install location
                 List<string> defaultLocations = new List<string>();
-                string programFilesX86 = Environment.ExpandEnvironmentVariables("%ProgramFiles(x86)%");
-                if (!string.IsNullOrWhiteSpace(programFilesX86))
-                {
-                    defaultLocations.Add(Path.Combine(programFilesX86, PlexFolder, PlexSubFolder));
-                }
-
                 string programFiles = Environment.ExpandEnvironmentVariables("%ProgramW6432%");
                 if (!string.IsNullOrWhiteSpace(programFiles))
                 {
                     defaultLocations.Add(Path.Combine(programFiles, PlexFolder, PlexSubFolder));
+                }
+                string programFilesX86 = Environment.ExpandEnvironmentVariables("%ProgramFiles(x86)%");
+                if (!string.IsNullOrWhiteSpace(programFilesX86))
+                {
+                    defaultLocations.Add(Path.Combine(programFilesX86, PlexFolder, PlexSubFolder));
                 }
 
                 foreach (string location in defaultLocations)
@@ -449,7 +453,7 @@ namespace TE.Plex
             {
                 try
                 {
-                    Process[] processes = Process.GetProcessesByName(PlexExecutable);
+                    Process[] processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(PlexExecutable));
                     if (processes.Length > 0)
                     {
                         string filePath = processes[0].MainModule.FileName;
@@ -519,7 +523,7 @@ namespace TE.Plex
             {
                 // Default the latest version to the currently installed
                 // version if an update doesn't exist
-                LatestVersion = CurrentVersion;
+                throw new InvalidOperationException("Could not obtain a verified Plex update package.");
             }
         }
 
@@ -641,11 +645,8 @@ namespace TE.Plex
 
             // Default to the 32-bit parameter installation, but change to the
             // 64-bit parameters if the 64-bit version of Plex is installed
-            string parameters = $"{PlexInstallParameters.Trim()} \"{logFile}\"";
-            if (Is64Bit)
-            {
-                parameters = $"{PlexInstallParametersx64.Trim()} \"{logFile}\"";
-            }
+            string parameters = InstallerArguments.Create(Is64Bit,
+                Is64Bit ? PlexInstallParametersx64 : PlexInstallParameters, logFile);
 
             ProcessStartInfo startInfo = new ProcessStartInfo(
                 LatestInstallPackage.FilePath,
@@ -654,7 +655,10 @@ namespace TE.Plex
             OnMessageChanged($"Run Plex installation - '{startInfo.FileName} {startInfo.Arguments}'.");
             using (Process install = Process.Start(startInfo))
             {
+                if (install == null) throw new InvalidOperationException("Plex installer did not start.");
                 install.WaitForExit();
+                if (install.ExitCode != 0 && install.ExitCode != 3010)
+                    throw new InvalidOperationException($"Plex installer failed with exit code {install.ExitCode}.");
             }
             OnMessageChanged("Plex install has finished.");
         }
@@ -676,13 +680,33 @@ namespace TE.Plex
             Process[] processes = Process.GetProcessesByName(fileName);
             foreach (Process proc in processes)
             {
-                proc.Kill();
-                proc.WaitForExit();
+                using (proc)
+                {
+                    int processId = -1;
+                    try
+                    {
+                        processId = proc.Id;
+                        OnMessageChanged($"Stopping {processName} process (PID {processId}).");
+                        proc.Kill();
+
+                        if (!proc.WaitForExit(ProcessExitTimeoutMilliseconds))
+                        {
+                            OnMessageChanged($"{processName} process (PID {processId}) did not exit after {ProcessExitTimeoutMilliseconds / 1000} seconds.");
+                        }
+                    }
+                    catch (Win32Exception ex)
+                    {
+                        OnMessageChanged($"Could not stop {processName} process (PID {processId}). Reason: {ex.Message}");
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        OnMessageChanged($"{processName} process (PID {processId}) exited while it was being stopped. Reason: {ex.Message}");
+                    }
+                }
             }
 
             // Check to see if any processes are still running
-            processes = Process.GetProcessesByName(fileName);
-            if (processes.Count() > 0)
+            if (AreProcessesRunning(fileName))
             {
                 using (Process process = new Process())
                 {
@@ -691,8 +715,38 @@ namespace TE.Plex
                         FileName = "taskkill.exe",
                         Arguments = $"/F /IM \"{processName}\""
                     };
-                    process.Start();
-                    process.WaitForExit();
+                    if (!process.Start() || !process.WaitForExit(ProcessExitTimeoutMilliseconds))
+                    {
+                        throw new InvalidOperationException(
+                            $"Could not stop {processName} processes within {ProcessExitTimeoutMilliseconds / 1000} seconds.");
+                    }
+                }
+            }
+
+            if (AreProcessesRunning(fileName))
+            {
+                throw new InvalidOperationException(
+                    $"{processName} processes are still running after shutdown attempts.");
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether any processes match a specific name.
+        /// </summary>
+        /// <param name="processName">The process name without the file extension.</param>
+        /// <returns>True if matching processes are running; otherwise, false.</returns>
+        private bool AreProcessesRunning(string processName)
+        {
+            Process[] processes = Process.GetProcessesByName(processName);
+            try
+            {
+                return processes.Length > 0;
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
                 }
             }
         }
@@ -703,57 +757,9 @@ namespace TE.Plex
         /// </summary>
         private void GetBitness()
         {
-            Is64Bit = false;
-            if (!Environment.Is64BitOperatingSystem)
-            {
-                return;
-            }
-
-            string programFiles = Environment.ExpandEnvironmentVariables("%ProgramW6432%");
-            if (string.IsNullOrWhiteSpace(programFiles))
-            {
-                return;
-            }
-
-            try
-            {
-                string plexPath = Path.Combine(programFiles, PlexFolder, PlexSubFolder, PlexExecutable);
-                if (File.Exists(plexPath))
-                {
-                    OnMessageChanged($"Plex found in: {plexPath}.");
-                    // Set the flag, but continue to determine if the Plex
-                    // process is also 64-bit to confirm this. We will keep
-                    // this value in case Plex isn't running and we can't
-                    // get the value using the process.
-                    Is64Bit = true;
-                }
-            }
-            catch (Exception ex)
-                when (ex is ArgumentException || ex is ArgumentNullException)
-            {
-                OnMessageChanged($"Couldn't determine if Plex is 64-bit. Treating Plex as 32-bit. Reason: {ex.Message}");
-                return;
-            }
-
-            try
-            {
-                Process[] processes = Process.GetProcessesByName(PlexExecutable);
-                if (processes.Count() > 0)
-                {
-                    bool retVal;
-                    if (!IsWow64Process(Process.GetCurrentProcess().Handle, out retVal))
-                    {
-                        OnMessageChanged($"Couldn't determine if Plex is 64-bit. Treating Plex as 32-bit.");
-                        return;
-                    }
-                    Is64Bit = retVal;
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                OnMessageChanged($"Couldn't determine if Plex is 64-bit. Treating Plex as 32-bit. Reason: {ex.Message}");
-                return;
-            }
+            string plexPath = Path.Combine(InstallFolder, PlexExecutable);
+            Is64Bit = BinaryArchitecture.Is64Bit(plexPath);
+            OnMessageChanged($"Detected architecture from installed executable: {plexPath}.");
         }
         #endregion
 
@@ -770,7 +776,7 @@ namespace TE.Plex
             try
             {
                 OnMessageChanged("Setting the installation log path.");
-                string defaultPath = Path.Combine(Path.GetTempPath(), PlexInstallLogFile);
+                string defaultPath = Path.GetTempPath();
                 string logPath = defaultPath;
                 if (!string.IsNullOrWhiteSpace(_logPath))
                 {
@@ -926,16 +932,15 @@ namespace TE.Plex
                     "The Plex service was not found.");
             }
 
-            OnMessageChanged("START: Stopping the Plex service.");
-            plexService.Stop();
-            OnMessageChanged("END: Stopping the Plex service.");
-
-            OnMessageChanged("START: Stopping the Plex Server processes.");
-            StopProcesses();
-            OnMessageChanged("END: Stopping the Plex Server processes.");
-
-            try
-            {
+            ServiceUpdateSequence.Run(() => {
+                OnMessageChanged("START: Stopping the Plex service.");
+                plexService.Stop();
+                OnMessageChanged("END: Stopping the Plex service.");
+            }, () => {
+                OnMessageChanged("START: Stopping the Plex Server processes.");
+                StopProcesses();
+                OnMessageChanged("END: Stopping the Plex Server processes.");
+            }, () => {
                 OnMessageChanged($"START: Running update: {LatestInstallPackage}.");
                 RunInstall();
                 OnMessageChanged("END: Running update.");
@@ -943,22 +948,14 @@ namespace TE.Plex
                 OnMessageChanged("START: Deleting Plex Run registry value.");
                 plexRegistry.DeleteRunValue();
                 OnMessageChanged("END: Deleting Plex Run registry value.");
-                GetVersions();
-            }
-            catch
-            {
-                throw;
-            }
-            finally
-            {
-                OnMessageChanged("START: Stopping the Plex Server processes.");
-                StopProcesses();
-                OnMessageChanged("END: Stopping the Plex Server processes.");
-
+                CurrentVersion = GetVersionFromFile(Path.Combine(InstallFolder, PlexExecutable));
+                if (CurrentVersion == null || CurrentVersion.CompareTo(LatestVersion) != 0)
+                    throw new InvalidOperationException("Installed Plex version does not match the selected package.");
+            }, () => {
                 OnMessageChanged("START: Restarting the Plex service.");
                 plexService.Start();
                 OnMessageChanged("END: Restarting the Plex service.");
-            }
+            });
         }
         #endregion
     }

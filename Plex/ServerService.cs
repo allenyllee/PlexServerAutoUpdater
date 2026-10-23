@@ -19,6 +19,10 @@ namespace TE.Plex
         /// The name of the Plex service.
         /// </summary>
         private static string ServiceName = ConfigurationManager.AppSettings["PlexServiceName"];
+        /// <summary>
+        /// The maximum time to wait for the Plex service to change state.
+        /// </summary>
+        private static readonly TimeSpan ServiceStatusTimeout = TimeSpan.FromMinutes(2);
         #endregion
 
         #region Properties
@@ -125,10 +129,28 @@ namespace TE.Plex
             {
                 using (ServiceController sc = new ServiceController(ServiceName))
                 {
-                    if (sc.Status == ServiceControllerStatus.Running)
+                    sc.Refresh();
+                    if (sc.Status == ServiceControllerStatus.Stopped)
+                    {
+                        return;
+                    }
+
+                    if (sc.Status == ServiceControllerStatus.StopPending)
+                    {
+                        sc.WaitForStatus(ServiceControllerStatus.Stopped, ServiceStatusTimeout);
+                        return;
+                    }
+
+                    if (sc.Status == ServiceControllerStatus.StartPending)
+                    {
+                        sc.WaitForStatus(ServiceControllerStatus.Running, ServiceStatusTimeout);
+                    }
+
+                    sc.Refresh();
+                    if (sc.Status != ServiceControllerStatus.Stopped)
                     {
                         sc.Stop();
-                        sc.WaitForStatus(ServiceControllerStatus.Stopped);
+                        sc.WaitForStatus(ServiceControllerStatus.Stopped, ServiceStatusTimeout);
                     }
                 }
             }
@@ -143,8 +165,31 @@ namespace TE.Plex
             {
                 using (ServiceController sc = new ServiceController(ServiceName))
                 {
+                    sc.Refresh();
+                    if (sc.Status == ServiceControllerStatus.Running)
+                    {
+                        return;
+                    }
+
+                    if (sc.Status == ServiceControllerStatus.StartPending)
+                    {
+                        sc.WaitForStatus(ServiceControllerStatus.Running, ServiceStatusTimeout);
+                        return;
+                    }
+
+                    if (sc.Status == ServiceControllerStatus.StopPending)
+                    {
+                        sc.WaitForStatus(ServiceControllerStatus.Stopped, ServiceStatusTimeout);
+                    }
+
+                    sc.Refresh();
+                    if (sc.Status == ServiceControllerStatus.Running)
+                    {
+                        return;
+                    }
+
                     sc.Start();
-                    sc.WaitForStatus(ServiceControllerStatus.Running);
+                    sc.WaitForStatus(ServiceControllerStatus.Running, ServiceStatusTimeout);
                 }
             }
         }
